@@ -10,6 +10,7 @@ import android.content.Context;
 import android.content.DialogInterface;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
+import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.RectF;
 import android.graphics.SurfaceTexture;
@@ -32,11 +33,13 @@ import android.util.Log;
 import android.util.Size;
 import android.util.SparseIntArray;
 import android.view.LayoutInflater;
+import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.TextureView;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.Toast;
 
 import com.parksangha.videorecorder.R;
@@ -261,8 +264,35 @@ public class Camera2VideoFragment extends Fragment
     public void onViewCreated(final View view, Bundle savedInstanceState) {
         mTextureView = (AutoFitTextureView) view.findViewById(R.id.texture);
         mButtonVideo = (Button) view.findViewById(R.id.video);
-        mButtonVideo.setOnClickListener(this);
+//        mButtonVideo.setOnClickListener(this);
 //        view.findViewById(R.id.info).setOnClickListener(this);
+
+
+
+        mButtonVideo.setOnTouchListener(new View.OnTouchListener() {
+            @Override
+            public boolean onTouch(View view, MotionEvent motionEvent) {
+                if (mIsRecordingVideo && MotionEvent.ACTION_UP == motionEvent.getAction()) {
+                    System.out.println("touch up");
+                    FrameLayout fl = (FrameLayout)getActivity().findViewById(R.id.camera_frame_layout);
+                    fl.setBackgroundColor(Color.parseColor("#4285f4"));
+
+//                    mIsRecordingVideo = false;
+//                    ((Button)view).setText(R.string.record);
+                    stopRecordingVideo();
+                } else if(mIsRecordingVideo == false && MotionEvent.ACTION_DOWN == motionEvent.getAction()){
+                    System.out.println("touch down");
+                    FrameLayout fl = (FrameLayout)getActivity().findViewById(R.id.camera_frame_layout);
+                    fl.setBackgroundColor(Color.parseColor("#ff3232"));
+
+//                    mIsRecordingVideo = true;
+//                    ((Button)view).setText(R.string.stop);
+                    startRecordingVideo();
+                }
+                return false;
+            }
+        });
+
     }
 
     @Override
