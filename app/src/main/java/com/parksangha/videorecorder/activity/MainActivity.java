@@ -9,10 +9,15 @@ import android.view.MenuItem;
 import android.view.View;
 import android.widget.Button;
 
+import com.github.hiteshsondhi88.libffmpeg.FFmpeg;
+import com.github.hiteshsondhi88.libffmpeg.LoadBinaryResponseHandler;
+import com.github.hiteshsondhi88.libffmpeg.exceptions.FFmpegNotSupportedException;
 import com.parksangha.videorecorder.R;
 
 
 public class MainActivity extends Activity {
+
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -20,6 +25,28 @@ public class MainActivity extends Activity {
         setContentView(R.layout.activity_main);
 
         this.initializeButtons();
+
+
+
+        FFmpeg ffmpeg = FFmpeg.getInstance(this);
+        try {
+            ffmpeg.loadBinary(new LoadBinaryResponseHandler() {
+
+                @Override
+                public void onStart() {}
+
+                @Override
+                public void onFailure() {}
+
+                @Override
+                public void onSuccess() {}
+
+                @Override
+                public void onFinish() {}
+            });
+        } catch (FFmpegNotSupportedException e) {
+            // Handle if FFmpeg is not supported by device
+        }
     }
 
     @Override
@@ -66,4 +93,6 @@ public class MainActivity extends Activity {
             }
         });
     }
+
+
 }

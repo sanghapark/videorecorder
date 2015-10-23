@@ -9,7 +9,7 @@ import android.view.MenuItem;
 import com.parksangha.videorecorder.R;
 import com.parksangha.videorecorder.fragment.Camera2VideoFragment;
 
-public class VideoRecordActivity extends Activity {
+public class VideoRecordActivity extends Activity{
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -40,5 +40,11 @@ public class VideoRecordActivity extends Activity {
         }
 
         return super.onOptionsItemSelected(item);
+    }
+
+    @Override
+    protected void onDestroy(){
+        super.onDestroy();
+
     }
 }

@@ -6,12 +6,14 @@ import android.app.AlertDialog;
 import android.app.Dialog;
 import android.app.DialogFragment;
 import android.app.Fragment;
+import android.app.ProgressDialog;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Matrix;
+import android.graphics.Point;
 import android.graphics.RectF;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
@@ -22,6 +24,8 @@ import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CameraMetadata;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.params.StreamConfigurationMap;
+import android.media.Image;
+import android.media.ImageReader;
 import android.media.MediaRecorder;
 import android.os.Bundle;
 import android.os.Handler;
@@ -32,6 +36,7 @@ import android.support.v4.app.ActivityCompat;
 import android.util.Log;
 import android.util.Size;
 import android.util.SparseIntArray;
+import android.view.Display;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.Surface;
@@ -40,14 +45,21 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import android.widget.RelativeLayout;
 import android.widget.Toast;
 
+import com.github.hiteshsondhi88.libffmpeg.ExecuteBinaryResponseHandler;
+import com.github.hiteshsondhi88.libffmpeg.FFmpeg;
+import com.github.hiteshsondhi88.libffmpeg.exceptions.FFmpegCommandAlreadyRunningException;
 import com.parksangha.videorecorder.R;
 import com.parksangha.videorecorder.TextureView.AutoFitTextureView;
 
 import java.io.File;
 import java.io.IOException;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
@@ -55,7 +67,21 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
 public class Camera2VideoFragment extends Fragment
-        implements View.OnClickListener, FragmentCompat.OnRequestPermissionsResultCallback {
+        implements View.OnClickListener, FragmentCompat.OnRequestPermissionsResultCallback{
+
+    private double mAspectRatio = 202.0/360.0;
+    private boolean mCropped = false;
+    private boolean mLoweredResolution = false;
+    private int mTransformStatus = 0;  // 0: nothing, 1: cropping, 2: loweringResolution
+    final private String mFilePath = "/sdcard/Android/data/com.parksangha.videorecorder/files/";
+    private String mFileNameRaw;
+    private String mFileNameCropped;
+    private String mFileName360;
+
+    private boolean mPuaseRecording = false;
+    private ProgressDialog progressDialog;
+
+
 
     private static final SparseIntArray ORIENTATIONS = new SparseIntArray();
 
@@ -74,6 +100,8 @@ public class Camera2VideoFragment extends Fragment
         ORIENTATIONS.append(Surface.ROTATION_180, 270);
         ORIENTATIONS.append(Surface.ROTATION_270, 180);
     }
+
+    private String mCameraId;
 
     /**
      * An {@link AutoFitTextureView} for camera preview.
@@ -195,7 +223,7 @@ public class Camera2VideoFragment extends Fragment
             mCameraDevice = null;
             Activity activity = getActivity();
             if (null != activity) {
-                activity.finish();
+//                activity.finish();
             }
         }
 
@@ -212,15 +240,48 @@ public class Camera2VideoFragment extends Fragment
      * @param choices The list of available sizes
      * @return The video size
      */
-    private static Size chooseVideoSize(Size[] choices) {
+    private Size chooseVideoSize(Size[] choices) {
         for (Size size : choices) {
-            if (size.getWidth() == size.getHeight() * 4 / 3 && size.getWidth() <= 1080) {
-                return size;
+
+            int sizeWidth = 0;
+            int sizeHeight = 0;
+            int tempInt = 0;
+
+            int orientation = getResources().getConfiguration().orientation;
+            if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
+                sizeWidth = size.getWidth();
+                sizeHeight = size.getHeight();
+                tempInt = round(sizeHeight * (4.0/3));
+                if (sizeWidth == tempInt && sizeWidth <= 1080) {
+                    return size;
+                }
+            } else {
+                sizeWidth = size.getHeight();
+                sizeHeight = size.getWidth();
+                tempInt = round(sizeWidth * (4.0/3));
+                if (sizeHeight == tempInt && sizeHeight <= 1080) {
+                    return size;
+                }
             }
+//
+//
+//            if (size.getWidth() == tempInt && size.getWidth() <= 1080) {
+//                return size;
+//            }
         }
         Log.e(TAG, "Couldn't find any suitable video size");
         return choices[choices.length - 1];
     }
+//    private static Size chooseVideoSize(Size[] choices) {
+//        for (Size size : choices) {
+//            if (size.getWidth() == size.getHeight() * 4 / 3 && size.getWidth() <= 1080) {
+//                return size;
+//            }
+//        }
+//        Log.e(TAG, "Couldn't find any suitable video size");
+//        return choices[choices.length - 1];
+//    }
+
 
     /**
      * Given {@code choices} of {@code Size}s supported by a camera, chooses the smallest one whose
@@ -233,6 +294,53 @@ public class Camera2VideoFragment extends Fragment
      * @param aspectRatio The aspect ratio
      * @return The optimal {@code Size}, or an arbitrary one if none were big enough
      */
+//    private Size chooseOptimalSize(Size[] choices, int width, int height, Size aspectRatio) {
+//        // Collect the supported resolutions that are at least as big as the preview Surface
+//        List<Size> bigEnough = new ArrayList<Size>();
+//        int w = 0;
+//        int h = 0;
+//        double optionRatio = 0.0;
+//        for (Size option : choices) {
+//            int sizeWidth = 0;
+//            int sizeHeight = 0;
+//            double ratio = 0.0;
+//            optionRatio = 0.0;
+//            int tempInt = 0;
+//
+//
+//            int orientation = getResources().getConfiguration().orientation;
+//            if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
+//                sizeWidth = option.getWidth();
+//                sizeHeight = option.getHeight();
+//                w = aspectRatio.getWidth();
+//                h = aspectRatio.getHeight();
+//                ratio = h*1.0/w;
+//                optionRatio = sizeHeight*1.0/sizeWidth;
+//                tempInt = round(sizeHeight * ratio);
+//            }
+//            else {
+//                sizeWidth = option.getHeight();
+//                sizeHeight = option.getWidth();
+//                w = aspectRatio.getHeight();
+//                h = aspectRatio.getWidth();
+//                ratio = h*1.0/w;
+//                optionRatio = sizeHeight*1.0/sizeWidth;
+//                tempInt = round(sizeWidth * ratio);
+//            }
+//
+//            if (sizeHeight == tempInt && sizeWidth >= width && sizeHeight >= height && ratio == optionRatio) {
+//                bigEnough.add(option);
+//            }
+//        }
+//
+//        // Pick the smallest of those, assuming we found any
+//        if (bigEnough.size() > 0) {
+//            return Collections.min(bigEnough, new CompareSizesByArea());
+//        } else {
+//            Log.e(TAG, "Couldn't find any suitable preview size");
+//            return choices[0];
+//        }
+//    }
     private static Size chooseOptimalSize(Size[] choices, int width, int height, Size aspectRatio) {
         // Collect the supported resolutions that are at least as big as the preview Surface
         List<Size> bigEnough = new ArrayList<Size>();
@@ -254,6 +362,7 @@ public class Camera2VideoFragment extends Fragment
         }
     }
 
+
     @Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container,
                              Bundle savedInstanceState) {
@@ -264,25 +373,63 @@ public class Camera2VideoFragment extends Fragment
     public void onViewCreated(final View view, Bundle savedInstanceState) {
         mTextureView = (AutoFitTextureView) view.findViewById(R.id.texture);
         mButtonVideo = (Button) view.findViewById(R.id.video);
-//        mButtonVideo.setOnClickListener(this);
-//        view.findViewById(R.id.info).setOnClickListener(this);
+
+        FrameLayout fl = (FrameLayout)getActivity().findViewById(R.id.camera_frame_layout);
+        int flWidth = fl.getWidth();
+
+        Display display = getActivity().getWindowManager().getDefaultDisplay();
+        Point size = new Point();
+        display.getSize(size);
+        int screenWidth = size.x;
+        int screenHeight = size.y;
+        int statusBarHeight = this.getStatusBarHeight();
+
+        double aspectRatio = 202.0/360.0;
+        int videoHeight = this.round(screenWidth * aspectRatio);
+        int flHeight  = screenHeight - statusBarHeight - videoHeight;
+
+
+
+//        int flHeight = (screenHeight - (screenWidth + statusBarHeight));
+
+
+
+
+
+        RelativeLayout.LayoutParams lp = new RelativeLayout.LayoutParams(screenWidth, flHeight);
+        fl.setLayoutParams(lp);
+
+        RelativeLayout.LayoutParams lp2 = (RelativeLayout.LayoutParams)fl.getLayoutParams();
+        lp2.addRule(RelativeLayout.ALIGN_PARENT_BOTTOM);
 
 
 
         mButtonVideo.setOnTouchListener(new View.OnTouchListener() {
             @Override
             public boolean onTouch(View view, MotionEvent motionEvent) {
-                if (mIsRecordingVideo && MotionEvent.ACTION_UP == motionEvent.getAction()) {
+
+                // 녹화 끝낼때때
+               if (mIsRecordingVideo && MotionEvent.ACTION_UP == motionEvent.getAction()) {
                     System.out.println("touch up");
-                    FrameLayout fl = (FrameLayout)getActivity().findViewById(R.id.camera_frame_layout);
+                    FrameLayout fl = (FrameLayout) getActivity().findViewById(R.id.camera_frame_layout);
                     fl.setBackgroundColor(Color.parseColor("#4285f4"));
 
 //                    mIsRecordingVideo = false;
 //                    ((Button)view).setText(R.string.record);
-                    stopRecordingVideo();
-                } else if(mIsRecordingVideo == false && MotionEvent.ACTION_DOWN == motionEvent.getAction()){
+
+                   mPuaseRecording = true;
+                    stopRecordingVideo(true);
+
+                   Button cancelButton = (Button)getActivity().findViewById(R.id.cancel_video);
+                   Button saveButton = (Button)getActivity().findViewById(R.id.save_video);
+                   cancelButton.setVisibility(View.VISIBLE);
+                   saveButton.setVisibility(View.VISIBLE);
+
+                }
+               // 녹화 시작할때
+               else if (!mIsRecordingVideo && MotionEvent.ACTION_DOWN == motionEvent.getAction()) {
                     System.out.println("touch down");
-                    FrameLayout fl = (FrameLayout)getActivity().findViewById(R.id.camera_frame_layout);
+                    FrameLayout fl = (FrameLayout) getActivity().findViewById(R.id.camera_frame_layout);
                     fl.setBackgroundColor(Color.parseColor("#ff3232"));
 
 //                    mIsRecordingVideo = true;
@@ -293,6 +440,61 @@ public class Camera2VideoFragment extends Fragment
             }
         });
 
+
+        Button cancelButton = (Button)getActivity().findViewById(R.id.cancel_video);
+        Button saveButton = (Button)getActivity().findViewById(R.id.save_video);
+
+        cancelButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                if(mPuaseRecording){
+                    File file = new File(mFilePath+mFileNameRaw+".mp4");
+                    boolean deletedRaw = file.delete();
+
+
+                    Button cancelButton = (Button)getActivity().findViewById(R.id.cancel_video);
+                    cancelButton.setVisibility(View.INVISIBLE);
+                    Button saveButton = (Button)getActivity().findViewById(R.id.save_video);
+                    saveButton.setVisibility(View.INVISIBLE);
+
+
+                    mPuaseRecording = false;
+
+                }
+            }
+        });
+
+
+        saveButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                if(mPuaseRecording){
+
+
+
+                    startTransformVideo();
+                    Button cancelButton = (Button)getActivity().findViewById(R.id.cancel_video);
+                    cancelButton.setVisibility(View.INVISIBLE);
+                    Button saveButton = (Button)getActivity().findViewById(R.id.save_video);
+                    saveButton.setVisibility(View.INVISIBLE);
+                    mPuaseRecording = false;
+                    progressDialog.show();
+                }
+            }
+        });
+
+        progressDialog = new ProgressDialog(getActivity());
+        progressDialog.setTitle(null);
+
+    }
+
+    public int getStatusBarHeight() {
+        int result = 0;
+        int resourceId = getResources().getIdentifier("status_bar_height", "dimen", "android");
+        if (resourceId > 0) {
+            result = getResources().getDimensionPixelSize(resourceId);
+        }
+        return result;
     }
 
     @Override
@@ -300,6 +502,10 @@ public class Camera2VideoFragment extends Fragment
         super.onResume();
         startBackgroundThread();
         if (mTextureView.isAvailable()) {
+
+
+
+
             openCamera(mTextureView.getWidth(), mTextureView.getHeight());
         } else {
             mTextureView.setSurfaceTextureListener(mSurfaceTextureListener);
@@ -318,7 +524,7 @@ public class Camera2VideoFragment extends Fragment
         switch (view.getId()) {
             case R.id.video: {
                 if (mIsRecordingVideo) {
-                    stopRecordingVideo();
+                    stopRecordingVideo(true);
                 } else {
                     startRecordingVideo();
                 }
@@ -443,8 +649,7 @@ public class Camera2VideoFragment extends Fragment
             StreamConfigurationMap map = characteristics
                     .get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
             mVideoSize = chooseVideoSize(map.getOutputSizes(MediaRecorder.class));
-            mPreviewSize = chooseOptimalSize(map.getOutputSizes(SurfaceTexture.class),
-                    width, height, mVideoSize);
+            mPreviewSize = chooseOptimalSize(map.getOutputSizes(SurfaceTexture.class), width, height, mVideoSize);
 
             int orientation = getResources().getConfiguration().orientation;
             if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
@@ -467,6 +672,9 @@ public class Camera2VideoFragment extends Fragment
             throw new RuntimeException("Interrupted while trying to lock camera opening.");
         }
     }
+
+
+
 
     private void closeCamera() {
         try {
@@ -593,8 +801,8 @@ public class Camera2VideoFragment extends Fragment
         mMediaRecorder.setVideoSource(MediaRecorder.VideoSource.SURFACE);
         mMediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
         mMediaRecorder.setOutputFile(getVideoFile(activity).getAbsolutePath());
-        mMediaRecorder.setVideoEncodingBitRate(10000000);
-        mMediaRecorder.setVideoFrameRate(30);
+        mMediaRecorder.setVideoEncodingBitRate(1000000);
+        mMediaRecorder.setVideoFrameRate(25);
         mMediaRecorder.setVideoSize(mVideoSize.getWidth(), mVideoSize.getHeight());
         mMediaRecorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264);
         mMediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
@@ -605,7 +813,11 @@ public class Camera2VideoFragment extends Fragment
     }
 
     private File getVideoFile(Context context) {
-        return new File(context.getExternalFilesDir(null), "video.mp4");
+        this.mFileNameRaw = getCurrentTimeFormat("yyyyMMddHHmm");
+        this.mFileNameCropped = mFileNameRaw + "Cropped";
+        this.mFileName360 = "video" + "_360x202";
+        return new File(context.getExternalFilesDir(null), this.mFileNameRaw+".mp4");
+//        return new File(context.getExternalFilesDir(null), "video.mp4");
     }
 
     private void startRecordingVideo() {
@@ -621,19 +833,30 @@ public class Camera2VideoFragment extends Fragment
         }
     }
 
-    private void stopRecordingVideo() {
-        // UI
+//    private void stopRecordingVideo() {
+//        // UI
+//        mIsRecordingVideo = false;
+//        mButtonVideo.setText(R.string.record);
+//        // Stop recording
+//        mMediaRecorder.stop();
+//        mMediaRecorder.reset();
+//        Activity activity = getActivity();
+//        if (null != activity) {
+//            Toast.makeText(activity, "Video saved: " + getVideoFile(activity),
+//                    Toast.LENGTH_LONG).show();
+//        }
+//        startPreview();
+//    }
+    private void stopRecordingVideo(boolean start) {
         mIsRecordingVideo = false;
-        mButtonVideo.setText(R.string.record);
-        // Stop recording
-        mMediaRecorder.stop();
-        mMediaRecorder.reset();
-        Activity activity = getActivity();
-        if (null != activity) {
-            Toast.makeText(activity, "Video saved: " + getVideoFile(activity),
-                    Toast.LENGTH_SHORT).show();
+
+        closeCamera();
+
+        if(start) {
+            openCamera(mTextureView.getWidth(), mTextureView.getHeight());
+            mIsRecordingVideo = false;
+            mButtonVideo.setText(R.string.record);
         }
-        startPreview();
     }
 
     /**
@@ -703,5 +926,136 @@ public class Camera2VideoFragment extends Fragment
         }
 
     }
+
+
+
+
+
+    private String getCurrentTimeFormat(String timeFormat){
+        String time = "";
+        SimpleDateFormat df = new SimpleDateFormat(timeFormat);
+        Calendar c = Calendar.getInstance();
+        time = df.format(c.getTime());
+        return time;
+    }
+
+    private static int round(double d){
+        double dAbs = Math.abs(d);
+        int i = (int) dAbs;
+        double result = dAbs - (double) i;
+        if(result<0.5){
+            return d<0 ? -i : i;
+        }else{
+            return d<0 ? -(i+1) : i+1;
+        }
+    }
+
+
+
+    private void startTransformVideo(){
+        String cmd = new String("-y -i {filepath}{filenameRaw}.mp4 -vf crop={width}:{height}:0:0 -acodec copy -threads 5 {filepath}{filenameCropped}.mp4");
+//                   String cmd = "-y -i {filepath}video.mp4 -filter_complex crop={width}:{height}:0:0, scale=360:202 -threads 3 -preset ultrafast -strict -2 -y {filepath}output.mp4";
+        int orientation = getResources().getConfiguration().orientation;
+        if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
+            cmd = cmd.replace("{width}", String.valueOf(mVideoSize.getWidth()));
+            cmd = cmd.replace("{height}", String.valueOf(mVideoSize.getHeight()));
+        } else {
+            int relWidth = mVideoSize.getHeight();
+            int relHeight = round(relWidth * mAspectRatio);
+            cmd = cmd.replace("{width}", String.valueOf(relHeight));
+            cmd = cmd.replace("{height}", String.valueOf(relWidth));
+            cmd = cmd.replace("{filepath}", mFilePath);
+            cmd = cmd.replace("{filenameRaw}", mFileNameRaw);
+            cmd = cmd.replace("{filenameCropped}", mFileNameCropped);
+        }
+        executeFFmpegCmd(cmd);
+        mTransformStatus = 1;
+    }
+
+
+    // ffmpeg -i file:///storage/emulated/0/Android/data/com.parksangha.videorecorder/files/video.mp4 -filter:v "crop=360:202:0:0" file:///storage/emulated/0/Android/data/com.parksangha.videorecorder/files/videoout.mp4
+    private void executeFFmpegCmd(String cmd){
+        FFmpeg ffmpeg = FFmpeg.getInstance(getActivity());
+        try{
+            ffmpeg.execute(cmd, new ExecuteBinaryResponseHandler(){
+
+                @Override
+                public void onStart() {
+                    System.out.println("onStart");
+                }
+
+                @Override
+                public void onProgress(String message) {
+                    System.out.println("onProgress : " + message);
+                    progressDialog.setMessage("Saving. Please wait... : " + message);
+                }
+
+                @Override
+                public void onFailure(String message) {
+                    System.out.println("onFailure : " + message);
+                }
+
+                @Override
+                public void onSuccess(String message) {
+                    System.out.println("onSuccess : " + message);
+                    if (mTransformStatus==1){
+                        mCropped = true;
+                    }
+                    else if(mTransformStatus == 2){
+                        mLoweredResolution = true;
+                    }
+                }
+
+                @Override
+                public void onFinish() {
+                    System.out.println("onFinish");
+
+                    if (mTransformStatus==1 && mCropped==true && mLoweredResolution==false) {
+//                        String cmd = new String("-y -i {filepath}output.mp4 -s 202x360 -acodec mp2 -strict -2 -ac 1 -ar 16000 -r 13 -ab 32000 -aspect 202:360 {filepath}output360.mp4");
+//                        String cmd = new String("-y -i {filepath}video.mp4 -vf crop={width}:{height}:0:0 -acodec copy -threads 5 {filepath}output.mp4");
+
+
+
+                        String cmd =   new String("-y -i {filepath}{filenameCropped}.mp4 -vf scale=202:360 -acodec copy -threads 5 {filepath}{filename360}.mp4");
+                        cmd = cmd.replace("{filepath}", mFilePath);
+                        cmd = cmd.replace("{filenameCropped}", mFileNameCropped);
+                        cmd = cmd.replace("{filename360}", mFileName360);
+                        executeFFmpegCmd(cmd);
+                        mTransformStatus = 2;
+                    }
+                    else{
+                        mTransformStatus = 0;
+                        mCropped = false;
+                        mLoweredResolution = false;
+                        File file = new File(mFilePath+mFileNameRaw+".mp4");
+                        boolean deletedRaw = file.delete();
+                        file  = new File(mFilePath+mFileNameCropped+".mp4");
+                        deletedRaw = file.delete();
+                        progressDialog.dismiss();
+                        AlertDialog alertDialog = new AlertDialog.Builder(getActivity()).create();
+                        alertDialog.setTitle("Notice");
+                        alertDialog.setMessage("Sucessfully saved " + mFileName360 +".mp4 file");
+                        alertDialog.setButton(AlertDialog.BUTTON_NEUTRAL, "OK",
+                                new DialogInterface.OnClickListener() {
+                                    public void onClick(DialogInterface dialog, int which) {
+                                        dialog.dismiss();
+                                    }
+                                });
+                        alertDialog.show();
+                    }
+
+                }
+
+
+            });
+        }
+        catch (FFmpegCommandAlreadyRunningException e){
+            e.printStackTrace();
+        }
+    }
+
+
+
+
 
 }

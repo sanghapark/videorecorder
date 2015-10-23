@@ -16,6 +16,8 @@
     <string name="cancel">Cancel</string>
     <string name="stop">Stop</string>
 
+    <string name="video1">Video 1</string>
+    <string name="video2">Video 2</string>
 
     <string name="permission_request">This app needs permission for camera and audio recording.</string>
     <string name="camera_error">This device doesn\'t support Camera2 API.</string>
